@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mexico 2026 Itinerary — Yolo-style Day Card</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <style>
+    :root{
+      --bg:#0b0c10; --panel:#12141a; --card:#171a21; --muted:#9aa4b2; --text:#e8edf3;
+      --line:#242a35; --accent:#7dd3fc; --accent2:#a78bfa;
+      --yolo:#fbbf24;
+    }
+    *{box-sizing:border-box}
+    html, body{height:100%;margin:0}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text);overflow:hidden}
+
+    .app{display:grid;grid-template-columns:420px 1fr;height:100vh;min-height:0}
+    .sidebar{
+      background:var(--panel);border-right:1px solid var(--line);
+      display:flex;flex-direction:column;height:100vh;min-height:0;min-width:320px;
+    }
+    .sidebar header{padding:16px 16px 10px;border-bottom:1px solid var(--line);flex:0 0 auto}
+    .title{font-size:16px;font-weight:700;margin:0 0 6px}
+    .subtitle{margin:0;color:var(--muted);font-size:12px;line-height:1.4}
+    .controls{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);flex:0 0 auto}
+    .controls input{width:100%;padding:10px 12px;background:#0f1116;border:1px solid var(--line);border-radius:10px;color:var(--text);outline:none}
+    .controls button{padding:10px 12px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#091014;border-radius:10px;font-weight:700;cursor:pointer;white-space:nowrap}
+    .daylist{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px 12px 18px}
+
+    .day{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 4px;cursor:pointer;transition:transform .08s ease,border-color .08s ease}
+    .day:hover{transform:translateY(-1px);border-color:#334155}
+    .day.active{border-color:var(--accent);box-shadow:0 0 0 1px rgba(125,211,252,.25) inset}
+    .day h3{margin:0;font-size:13px;line-height:1.25}
+    .meta{color:var(--muted);font-size:12px;margin-top:6px;line-height:1.35}
+    .pillrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    .pill{font-size:11px;padding:4px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:#0f1116}
+    .pill.route{color:#2a1a03;background:rgba(251,191,36,.18);border-color:rgba(251,191,36,.35)}
+    .pill.flight{color:#2b0812;background:rgba(251,113,133,.18);border-color:rgba(251,113,133,.35)}
+
+    .map{display:flex;flex-direction:column;height:100vh;min-height:0;overflow:hidden}
+    #map{flex:1 1 auto;min-height:0;width:100%}
+    .route-shadow{filter: drop-shadow(0 0 8px rgba(251,191,36,.22));}
+
+    /* --- Yolo-ish day card — bottom bar --- */
+    .daycard{
+      flex:0 0 auto;
+      width:100%;
+      max-height:38vh;
+      overflow:hidden;
+      background:rgba(13,14,18,.98);
+      border-top:1px solid var(--line);
+      padding:10px 16px 10px;
+      box-shadow: 0 -8px 32px rgba(0,0,0,.45);
+      display:none; /* hidden until a day is selected */
+      flex-direction:column;
+    }
+    /* inner scroll area */
+    .daycard-scroll{
+      overflow-y:auto;
+      flex:1 1 auto;
+      min-height:0;
+    }
+    .daycard-head{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid rgba(36,42,53,.65);
+      flex:0 0 auto;
+    }
+    .daycard-meta{display:flex;align-items:center;gap:14px;flex:1;min-width:0}
+    .daycard-kicker{
+      color:var(--yolo);
+      font-weight:800;
+      font-size:11px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      margin:0;
+      white-space:nowrap;
+    }
+    .daycard-title{margin:0;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .daycard-sub{margin:0;color:var(--muted);font-size:11px;white-space:nowrap}
+    .iconbtn{
+      border:1px solid var(--line);
+      background:#0f1116;color:var(--text);
+      width:28px;height:28px;border-radius:8px;cursor:pointer;display:grid;place-items:center;flex:0 0 auto;
+      font-size:11px;
+    }
+
+    .chips{display:flex;flex-wrap:wrap;gap:4px;margin:0}
+    .chip{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);background:#0f1116;color:var(--muted)}
+    .chip.stay{background:rgba(125,211,252,.12);border-color:rgba(125,211,252,.28);color:var(--accent)}
+    .chip.route{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.35);color:var(--yolo)}
+
+    /* Main content grid — horizontal columns */
+    .blocks{
+      display:grid;
+      grid-template-columns: minmax(160px,1.2fr) 2fr 1.2fr 1fr;
+      gap:10px;
+      align-items:start;
+    }
+    .block{
+      background:#0f1116;border:1px solid var(--line);border-radius:12px;padding:8px 10px;
+      height:100%;
+    }
+    .block h4{margin:0 0 5px;font-size:11px;color:#8b97a8;text-transform:uppercase;letter-spacing:.06em}
+    .block ul{margin:0;padding-left:16px;color:#dbe5f0;font-size:11px;line-height:1.5}
+    .muted{color:var(--muted);font-size:11px;line-height:1.5}
+
+    .ampm{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:6px;
+    }
+    .row{
+      display:flex;gap:8px;align-items:flex-start;
+      padding:6px 8px;border-radius:10px;border:1px solid rgba(36,42,53,.65);background:rgba(15,17,22,.55);
+    }
+    .badge{
+      flex:0 0 auto;
+      width:36px;height:22px;
+      border-radius:999px;
+      display:grid;place-items:center;
+      font-weight:800;font-size:10px;
+      background:rgba(251,191,36,.18);
+      border:1px solid rgba(251,191,36,.35);
+      color:var(--yolo);
+    }
+    .row h5{margin:0;font-size:11px;color:#e8edf3}
+    .row p{margin:2px 0 0;font-size:11px;color:#9aa4b2;line-height:1.4}
+
+    .dinner-grid{display:flex;flex-direction:column;gap:6px}
+    .dinner-picks{display:grid;gap:5px}
+    .pick{
+      display:flex;gap:8px;align-items:flex-start;
+      padding:6px 8px;border-radius:10px;border:1px solid rgba(36,42,53,.65);background:rgba(15,17,22,.55);
+    }
+    .dot{
+      width:8px;height:8px;border-radius:999px;margin-top:3px;
+      background:var(--yolo);
+      box-shadow:0 0 0 3px rgba(251,191,36,.16);
+      flex:0 0 auto;
+    }
+    .pick b{font-size:11px}
+    .pick span{display:block;color:var(--muted);font-size:10px;line-height:1.35;margin-top:1px}
+
+    @media (max-width: 980px){
+      body{overflow:auto}
+      .app{grid-template-columns:1fr;height:auto}
+      .sidebar{height:auto;min-height:auto}
+      .daylist{max-height:52vh}
+      .map{height:auto;overflow:visible}
+      #map{height:55vh}
+      .daycard{max-height:none;position:static}
+      .blocks{grid-template-columns:1fr 1fr}
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <header>
+      <p class="title">Mexico Itinerary (Jul 18 – Aug 14, 2026)</p>
+      <p class="subtitle">Click a day. Day card is styled like a mini guide entry (AM/PM/Dinner + Yolo picks).</p>
+    </header>
+
+    <div class="controls">
+      <input id="search" placeholder="Search days (e.g., 'Cerritos', 'Dum', 'Fish Shack')">
+      <button id="fit">Fit Map</button>
+    </div>
+
+    <div class="daylist" id="daylist"></div>
+  </aside>
+
+  <main class="map">
+    <div id="map"></div>
+
+    <section class="daycard" id="dayCard">
+      <div class="daycard-head">
+        <div class="daycard-meta">
+          <p class="daycard-kicker" id="dcKicker">Day</p>
+          <h2 class="daycard-title" id="dcTitle">Select a day</h2>
+          <p class="daycard-sub" id="dcSub">Click a day card on the left.</p>
+          <div class="chips" id="dcChips"></div>
+        </div>
+        <button class="iconbtn" id="dcClose" title="Hide card" aria-label="Hide card">✕</button>
+      </div>
+
+      <div class="daycard-scroll"><div class="blocks">
+        <div class="block">
+          <h4>Overview</h4>
+          <div class="muted" id="dcOverview">—</div>
+        </div>
+
+        <div class="block">
+          <h4>Plan</h4>
+          <div class="ampm">
+            <div class="row">
+              <div class="badge">AM</div>
+              <div>
+                <h5>Morning</h5>
+                <p id="dcAM">—</p>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="badge">PM</div>
+              <div>
+                <h5>Afternoon</h5>
+                <p id="dcPM">—</p>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="badge">EVE</div>
+              <div>
+                <h5>Dinner</h5>
+                <p id="dcDinner">—</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="block">
+          <h4>Dinner picks (Yolo-style)</h4>
+          <div class="dinner-grid">
+            <div class="dinner-picks" id="dcDinnerPicks"></div>
+            <div class="muted" id="dcDinnerNote"></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <h4>Logistics</h4>
+          <ul id="dcLogistics"></ul>
+        </div>
+      </div></div><!-- end blocks / daycard-scroll -->
+    </section>
+  </main>
+</div>
+
+<script>
+  const stays = [
+    { place: "San José del Cabo", checkIn: "2026-07-18", checkOut: "2026-07-21" },
+    { place: "East Cape", checkIn: "2026-07-21", checkOut: "2026-07-24" },
+    { place: "Todos Santos / El Pescadero", checkIn: "2026-07-24", checkOut: "2026-07-28" },
+    { place: "La Paz", checkIn: "2026-07-28", checkOut: "2026-08-01" },
+    { place: "Mexico City (Roma/Condesa)", checkIn: "2026-08-01", checkOut: "2026-08-06" },
+    { place: "Puerto Escondido", checkIn: "2026-08-06", checkOut: "2026-08-14" }
+  ];
+
+  function stayForDate(dateStr){
+    const d = new Date(dateStr + "T00:00:00");
+    for (const s of stays){
+      const ci = new Date(s.checkIn + "T00:00:00");
+      const co = new Date(s.checkOut + "T00:00:00");
+      if (d >= ci && d < co) return s.place;
+    }
+    return "—";
+  }
+
+  // NOTE: Dinner picks below are based on the attached Yolo Journal PDFs:
+  // - The Southern Baja List (e.g., Flora Farms; Dum; Green Room; Agricole/Coyote; Il Giardino; Barracuda)
+  // - Baja Road Trip (e.g., La Confianza, Taller 17, Dum; Barracuda; Tiger Club; Made Pizza; Nim & Oyster House)
+  // - Dispatch from Puerto Escondido (e.g., Fish Shack; Amarisa; La Juquilana; Mombasa; El Arbol)
+
+  const itinerary = [
+    {
+      id:1, date:"2026-07-18", dow:"Fri",
+      title:"LAX → SJD → San José del Cabo", coords:[23.058,-109.697],
+      overview:"Arrive LAX early, fly same day to SJD, easy check-in + reset.",
+      am:"Arrive LAX 07:05. Coffee + stretch. Check in for SJD flight.",
+      pm:"Fly to SJD. Transfer to hotel. Pool + nap.",
+      dinner:"Easy early dinner near hotel or on-site.",
+      dinnerOptions:[
+        { name:"Resort/Hotel signature restaurant", note:"Low-effort first night: sunset cocktails + dinner on-site." },
+        { name:"Old Town San José (Art District zone)", note:"Pair with a stroll through the Art Walk streets." },
+        { name:"Flora Farms", note:"If energy allows — guide highlight near airport valley." }
+      ],
+      dinnerNote:"Keep it close and early tonight.",
+      logistics:["07:05 land LAX","Same-day LAX→SJD flight (aim mid-morning)","SJD transfer 20–40 min"],
+      bookings:[{type:"Flight", note:"LAX→SJD"}], tags:["travel"]
+    },
+    {
+      id:2, date:"2026-07-19", dow:"Sat",
+      title:"San José — easy settle", coords:[23.058,-109.697],
+      overview:"First full day: swimmable beach time + deep rest.",
+      am:"Swimmable beach time (Sea of Cortez side).",
+      pm:"Pool, spa, relax.",
+      dinner:"Flora Farms or Art District dinner.",
+      dinnerOptions:[
+        { name:"Flora Farms", note:"Yolo highlight. Great food + drinks; near airport valley. Make it an early dinner." },
+        { name:"San José Art District dinner", note:"Wander + pick a spot. Good for an easy nice night." },
+        { name:"On-site restaurant", note:"If you're in a resort-style stay, keep it simple and romantic." }
+      ],
+      dinnerNote:"",
+      logistics:["No long transfers"],
+      bookings:[], tags:[]
+    },
+    {
+      id:3, date:"2026-07-20", dow:"Sun",
+      title:"San José — art + food", coords:[23.058,-109.697],
+      overview:"Slow day with a little culture; stay near home base.",
+      am:"Slow coffee + walk.",
+      pm:"San José Art District wander.",
+      dinner:"Art Walk restaurant or hotel tasting menu.",
+      dinnerOptions:[
+        { name:"Art Walk restaurant", note:"Gallery wandering then dinner nearby — easy and atmospheric." },
+        { name:"Hotel tasting/menu night", note:"If your hotel has a strong kitchen, make it a stay-in night." },
+        { name:"Flora Farms", note:"Great if you missed it on Day 2." }
+      ],
+      dinnerNote:"",
+      logistics:["Short drives/Ubers"],
+      bookings:[], tags:[]
+    },
+    {
+      id:4, date:"2026-07-21", dow:"Mon",
+      title:"Drive to East Cape", coords:[23.295,-109.429],
+      overview:"Switch to a quieter coastline. Pick up the car and drive east.",
+      am:"Pick up rental car. Drive to East Cape.",
+      pm:"Swim + beach time.",
+      dinner:"On-site relaxed dinner.",
+      dinnerOptions:[
+        { name:"On-site restaurant", note:"Best move on arrival day — low friction." },
+        { name:"Simple seafood nearby", note:"Keep it casual after a drive day." },
+        { name:"Sunset cocktails + light plates", note:"Early easy night." }
+      ],
+      dinnerNote:"",
+      logistics:["Pick up rental car","Drive ~1–2 hrs"],
+      bookings:[{type:"Transport", note:"Drive"}], tags:["travel"]
+    },
+    {
+      id:5, date:"2026-07-22", dow:"Tue",
+      title:"Cabo Pulmo snorkel day", coords:[23.447,-109.418],
+      overview:"Primary snorkel day in Baja — book the tour ahead.",
+      am:"Drive to Cabo Pulmo. Snorkel tour.",
+      pm:"Return + pool.",
+      dinner:"Casual seafood dinner.",
+      dinnerOptions:[
+        { name:"Casual seafood near base", note:"Easy win after a long water day." },
+        { name:"On-site dinner", note:"Recovery vibe — stay close." },
+        { name:"Simple tacos + sunset drink", note:"Keep it relaxed." }
+      ],
+      dinnerNote:"",
+      logistics:["Drive ~45–90 min each way to Cabo Pulmo"],
+      bookings:[{type:"Tour", note:"Cabo Pulmo snorkel/dive (book ahead)"}], tags:[]
+    },
+    {
+      id:6, date:"2026-07-23", dow:"Wed",
+      title:"East Cape — reset day", coords:[23.295,-109.429],
+      overview:"No agenda. Swim, read, decompress.",
+      am:"Swim + read.",
+      pm:"Pool + nap.",
+      dinner:"Easy sunset dinner.",
+      dinnerOptions:[
+        { name:"On-site sunset dinner", note:"The move for a true no-plans day." },
+        { name:"Simple seafood nearby", note:"Keep it local and casual." },
+        { name:"Cocktails + light snacks", note:"Sunset watching as the main event." }
+      ],
+      dinnerNote:"",
+      logistics:["None"],
+      bookings:[], tags:[]
+    },
+    {
+      id:7, date:"2026-07-24", dow:"Thu",
+      title:"Drive to Todos Santos / El Pescadero", coords:[23.448,-110.225],
+      overview:"Move to the Todos Santos / Pescadero zone — restaurants are a highlight.",
+      am:"Drive to Todos Santos / El Pescadero.",
+      pm:"Pool + explore town.",
+      dinner:"Dum / La Confianza / Green Room.",
+      dinnerOptions:[
+        { name:"Dum (Todos Santos)", note:"Yolo pick. Upscale in a palm grove; tasting menu vibe." },
+        { name:"La Confianza (Todos Santos)", note:"Yolo pick. Tapas + natural wine + cocktails." },
+        { name:"Green Room (north of Todos Santos)", note:"Yolo pick. Barefoot beach spot with better-than-usual food." }
+      ],
+      dinnerNote:"Pescadero alternates: Agricole / Coyote / Cien Palmas Hierbabuena.",
+      logistics:["Drive ~2.5–3 hrs from East Cape"],
+      bookings:[{type:"Transport", note:"Drive"}], tags:["travel"]
+    },
+    {
+      id:8, date:"2026-07-25", dow:"Fri",
+      title:"Cerritos beach + town", coords:[23.370,-110.175],
+      overview:"Beach day with a fish-taco anchor and gallery wander.",
+      am:"Swim at Cerritos.",
+      pm:"Town wander + galleries.",
+      dinner:"Barracuda Tacos or Green Room.",
+      dinnerOptions:[
+        { name:"Barracuda Tacos (Cerritos Beach)", note:"Yolo pick. Best fish & shrimp tacos in the area." },
+        { name:"Green Room", note:"Sunset beach dining with good food." },
+        { name:"La Esquina / Jardin Alquimia (Todos Santos)", note:"Yolo mentions for a nicer sit-down." }
+      ],
+      dinnerNote:"",
+      logistics:["Local drives 10–25 min"],
+      bookings:[], tags:[]
+    },
+    {
+      id:9, date:"2026-07-26", dow:"Sat",
+      title:"Polaris/ATV day", coords:[23.448,-110.225],
+      overview:"Off-road Baja adventure day — book the tour 1–2 weeks ahead.",
+      am:"Off-road Polaris / ATV tour.",
+      pm:"Relax at hotel.",
+      dinner:"Dum (main reservation night).",
+      dinnerOptions:[
+        { name:"Dum", note:"Make this your big reservation night — well-earned after the tour." },
+        { name:"La Confianza", note:"Great wine/cocktail vibe if you want something more casual." },
+        { name:"Il Giardino (Todos Santos)", note:"Yolo mention. Solid simpler choice." }
+      ],
+      dinnerNote:"",
+      logistics:["Half-day tour + return"],
+      bookings:[{type:"Tour", note:"Polaris/ATV (book 1–2 weeks ahead)"}], tags:[]
+    },
+    {
+      id:10, date:"2026-07-27", dow:"Sun",
+      title:"Todos Santos — slow day", coords:[23.448,-110.225],
+      overview:"Final day in Todos Santos. Easy pace before La Paz.",
+      am:"Coffee + stroll.",
+      pm:"Pool.",
+      dinner:"Casual tacos or wine bar.",
+      dinnerOptions:[
+        { name:"La Confianza", note:"Great for a wine bar / tapas slow evening." },
+        { name:"Local tacos spot", note:"Keep it simple and casual." },
+        { name:"Green Room", note:"Easy beach vibe for a final Todos Santos night." }
+      ],
+      dinnerNote:"",
+      logistics:["None — free day"],
+      bookings:[], tags:[]
+    },
+    {
+      id:11, date:"2026-07-28", dow:"Mon",
+      title:"Drive to La Paz", coords:[24.142,-110.313],
+      overview:"La Paz base for Espíritu Santo + Balandra days.",
+      am:"Drive to La Paz.",
+      pm:"Malecón walk.",
+      dinner:"Tiger Club / Nim / Made Pizza.",
+      dinnerOptions:[
+        { name:"Tiger Club", note:"Yolo pick. Southeast Asian; hip/creative atmosphere." },
+        { name:"Nim & Oyster House", note:"Yolo pick. Seafood-leaning, great for a first La Paz dinner." },
+        { name:"Made Pizza", note:"Yolo pick. Easy casual night after the drive." }
+      ],
+      dinnerNote:"",
+      logistics:["Drive ~1.5 hrs from Todos Santos"],
+      bookings:[{type:"Transport", note:"Drive"}], tags:["travel"]
+    },
+    {
+      id:12, date:"2026-07-29", dow:"Tue",
+      title:"Isla Espíritu Santo — boat day", coords:[24.577,-110.399],
+      overview:"Full day boat trip — sea lions, snorkeling, beach picnic.",
+      am:"Boat departure + swim with sea lions.",
+      pm:"Beach picnic + snorkeling.",
+      dinner:"Casual La Paz dinner.",
+      dinnerOptions:[
+        { name:"Nim & Oyster House", note:"Great seafood to cap a water-heavy day." },
+        { name:"Made Pizza", note:"Easy and relaxed after a long day out." },
+        { name:"Malecón waterfront spot", note:"Sunset walk + dinner along the waterfront." }
+      ],
+      dinnerNote:"",
+      logistics:["Book boat tour in advance"],
+      bookings:[{type:"Tour", note:"Isla Espíritu Santo boat (book ahead)"}], tags:[]
+    },
+    {
+      id:13, date:"2026-07-30", dow:"Wed",
+      title:"La Paz — Balandra Beach", coords:[24.317,-110.333],
+      overview:"Balandra is one of the most beautiful beaches in Mexico — go early.",
+      am:"Early Balandra swim.",
+      pm:"Return + pool.",
+      dinner:"Seafood dinner in La Paz.",
+      dinnerOptions:[
+        { name:"Seafood restaurant on the Malecón", note:"Classic La Paz move." },
+        { name:"Tiger Club", note:"If you missed it on Day 11." },
+        { name:"Nim & Oyster House", note:"Seafood again — perfectly appropriate after a beach day." }
+      ],
+      dinnerNote:"",
+      logistics:["Drive ~30 min to Balandra"],
+      bookings:[], tags:[]
+    },
+    {
+      id:14, date:"2026-07-31", dow:"Thu",
+      title:"La Paz — buffer day", coords:[24.142,-110.313],
+      overview:"Free day in La Paz. Sleep in, optional activities, no agenda.",
+      am:"Sleep in + café.",
+      pm:"Optional kayaking or free time.",
+      dinner:"Easy dinner.",
+      dinnerOptions:[
+        { name:"Made Pizza", note:"Relaxed easy night." },
+        { name:"Any Malecón spot", note:"Wander and pick something good-looking." },
+        { name:"Tiger Club", note:"If you haven't been yet." }
+      ],
+      dinnerNote:"",
+      logistics:["None — buffer day"],
+      bookings:[], tags:[]
+    },
+    {
+      id:15, date:"2026-08-01", dow:"Fri",
+      title:"Fly La Paz → Mexico City", coords:[19.412,-99.167],
+      overview:"Travel day to CDMX. Arrive and settle into Roma/Condesa.",
+      am:"Transfer to airport + flight.",
+      pm:"Check into Roma/Condesa hotel.",
+      dinner:"Walkable neighbourhood restaurant.",
+      dinnerOptions:[
+        { name:"Roma/Condesa neighbourhood spot", note:"Walk out and pick something good — the area is excellent." },
+        { name:"Contramar", note:"Classic CDMX seafood — worth booking ahead." },
+        { name:"Hotel restaurant", note:"If you want easy after a travel day." }
+      ],
+      dinnerNote:"",
+      logistics:["Flight La Paz → Mexico City"],
+      bookings:[{type:"Flight", note:"La Paz → CDMX"}], tags:["travel"]
+    },
+    {
+      id:16, date:"2026-08-02", dow:"Sat",
+      title:"CDMX — culture day", coords:[19.412,-99.167],
+      overview:"Anthropology Museum + Chapultepec Park — full culture day.",
+      am:"Anthropology Museum.",
+      pm:"Chapultepec Park.",
+      dinner:"Pujol / Quintonil (if booked) or Roma restaurant.",
+      dinnerOptions:[
+        { name:"Pujol", note:"One of the world's best restaurants. Book months ahead." },
+        { name:"Quintonil", note:"Incredible modern Mexican. Also needs advance booking." },
+        { name:"Local Roma restaurant", note:"Great neighbourhood dining if the above aren't booked." }
+      ],
+      dinnerNote:"If Pujol/Quintonil aren't booked, the Roma/Condesa neighbourhood has excellent options at every level.",
+      logistics:["Walk/Uber"],
+      bookings:[], tags:[]
+    },
+    {
+      id:17, date:"2026-08-03", dow:"Sun",
+      title:"CDMX — Barragán + Coyoacán", coords:[19.348,-99.162],
+      overview:"Architecture + neighbourhood day. Timed entry for Barragán House required.",
+      am:"Luis Barragán House (timed entry — book ahead).",
+      pm:"Coyoacán + Frida Kahlo area.",
+      dinner:"Neighbourhood dinner.",
+      dinnerOptions:[
+        { name:"Coyoacán neighbourhood restaurant", note:"Dine near the plaza after a full afternoon there." },
+        { name:"Roma dinner on return", note:"Head back and eat well in the neighbourhood." },
+        { name:"Mercado Coyoacán food stalls", note:"Casual and authentic — great for a late lunch that carries through." }
+      ],
+      dinnerNote:"Book Barragán House timed entry well in advance.",
+      logistics:["Timed entry tickets for Barragán House (book ahead)"],
+      bookings:[], tags:[]
+    },
+    {
+      id:18, date:"2026-08-04", dow:"Mon",
+      title:"CDMX — Teotihuacán", coords:[19.692,-98.843],
+      overview:"Early start for the pyramids — beat the heat and crowds.",
+      am:"Early pyramids tour.",
+      pm:"Return + rest.",
+      dinner:"Relaxed Roma dinner.",
+      dinnerOptions:[
+        { name:"Easy Roma/Condesa dinner", note:"You'll be tired — keep it close and relaxed." },
+        { name:"Contramar", note:"Classic CDMX seafood if you haven't been." },
+        { name:"Neighbourhood tacos", note:"Simple and perfect after a big day out." }
+      ],
+      dinnerNote:"Leave very early to beat the heat at the pyramids.",
+      logistics:["Day trip ~50 min from CDMX"],
+      bookings:[], tags:[]
+    },
+    {
+      id:19, date:"2026-08-05", dow:"Tue",
+      title:"CDMX — markets + final night", coords:[19.432,-99.143],
+      overview:"Final full day in Mexico City. Markets, design stores, special dinner.",
+      am:"Mercado exploration.",
+      pm:"Coffee + design stores.",
+      dinner:"Special final Mexico City dinner.",
+      dinnerOptions:[
+        { name:"Pujol", note:"If you haven't been — make tonight the night." },
+        { name:"Quintonil", note:"Great final night option if booked." },
+        { name:"Top Roma/Condesa spot", note:"The neighbourhood deserves one proper send-off dinner." }
+      ],
+      dinnerNote:"Make this dinner a highlight — last night in CDMX.",
+      logistics:["Walk/Uber"],
+      bookings:[], tags:[]
+    },
+    {
+      id:20, date:"2026-08-06", dow:"Wed",
+      title:"Fly CDMX → Puerto Escondido", coords:[15.862,-97.072],
+      overview:"Travel day to the coast. Arrive and decompress at the beach.",
+      am:"Flight to Puerto Escondido.",
+      pm:"Beach + pool.",
+      dinner:"Fish Shack / beachfront dinner.",
+      dinnerOptions:[
+        { name:"Fish Shack", note:"Yolo pick. Fresh seafood + famous fried cauliflower tacos." },
+        { name:"Beachfront dinner in La Punta", note:"Easy first night on the coast." },
+        { name:"El Árbol (food court)", note:"Variety and casual — good arrival night option." }
+      ],
+      dinnerNote:"",
+      logistics:["Flight CDMX → Puerto Escondido"],
+      bookings:[{type:"Flight", note:"CDMX → Puerto Escondido"}], tags:["travel"]
+    },
+    {
+      id:21, date:"2026-08-07", dow:"Thu",
+      title:"Puerto — swim day", coords:[15.856,-97.071],
+      overview:"Swim-friendly beach focus + food in La Punta.",
+      am:"Playa Carrizalillo swim.",
+      pm:"Pool + nap.",
+      dinner:"Mombasa / El Árbol.",
+      dinnerOptions:[
+        { name:"Mombasa", note:"Yolo pick. Scene-y restaurant-bar with good DJs + vegan entrées." },
+        { name:"El Árbol (food court)", note:"Yolo pick. Easy variety option." },
+        { name:"Fish Shack", note:"If you missed it last night — great casual seafood." }
+      ],
+      dinnerNote:"Breakfast pick: Amarisa (great coffee + standout breakfasts).",
+      logistics:["Taxi/short walk depending on base"],
+      bookings:[], tags:[]
+    },
+    {
+      id:22, date:"2026-08-08", dow:"Fri",
+      title:"Puerto — Casa Wabi", coords:[15.865,-97.003],
+      overview:"Visit the Tadao Ando–designed art foundation. Book access ahead.",
+      am:"Visit Casa Wabi.",
+      pm:"Beach time.",
+      dinner:"Relaxed dinner in town.",
+      dinnerOptions:[
+        { name:"La Juquilana", note:"Yolo pick. Local Oaxacan-influenced spot." },
+        { name:"Fish Shack", note:"Reliable and fresh after a full day." },
+        { name:"Neighbourhood spot in town", note:"Easy and relaxed." }
+      ],
+      dinnerNote:"Book Casa Wabi access in advance.",
+      logistics:["Transport to Casa Wabi (~30 min)"],
+      bookings:[], tags:[]
+    },
+    {
+      id:23, date:"2026-08-09", dow:"Sat",
+      title:"Puerto — boat + snorkel", coords:[15.862,-97.072],
+      overview:"Coastal boat trip for snorkeling and swimming.",
+      am:"Coastal boat/snorkel trip.",
+      pm:"Rest.",
+      dinner:"Seafood + sunset drinks.",
+      dinnerOptions:[
+        { name:"Fish Shack", note:"Perfect post-water-day seafood." },
+        { name:"Mombasa", note:"Sunset drinks + dinner — scene-y vibe." },
+        { name:"Beachfront spot in La Punta", note:"Walk and pick something good-looking." }
+      ],
+      dinnerNote:"",
+      logistics:["Book boat trip ahead"],
+      bookings:[{type:"Tour", note:"Coastal boat/snorkel (book ahead)"}], tags:[]
+    },
+    {
+      id:24, date:"2026-08-10", dow:"Sun",
+      title:"Puerto — do nothing day", coords:[15.862,-97.072],
+      overview:"No agenda. Pool, reading, complete rest.",
+      am:"Sleep in.",
+      pm:"Pool + reading.",
+      dinner:"Casual tacos.",
+      dinnerOptions:[
+        { name:"Local taco stand", note:"Unpretentious and perfect for a no-plans day." },
+        { name:"El Árbol food court", note:"Easy variety without a full sit-down commitment." },
+        { name:"On-site or nearby easy dinner", note:"Stay close." }
+      ],
+      dinnerNote:"",
+      logistics:["None"],
+      bookings:[], tags:[]
+    },
+    {
+      id:25, date:"2026-08-11", dow:"Mon",
+      title:"Puerto — bioluminescence night", coords:[15.859,-97.072],
+      overview:"Night bioluminescence tour — one of the trip highlights.",
+      am:"Beach walk.",
+      pm:"Relax.",
+      dinner:"Early dinner before night tour.",
+      dinnerOptions:[
+        { name:"Early dinner at Fish Shack", note:"Eat early and light before the night tour." },
+        { name:"La Juquilana", note:"Good early dinner option." },
+        { name:"Simple beachside meal", note:"Keep it light — the tour is the main event tonight." }
+      ],
+      dinnerNote:"Book the bioluminescence tour ahead — best in dark moon periods.",
+      logistics:["Night bioluminescence tour (book ahead)"],
+      bookings:[{type:"Tour", note:"Bioluminescence night tour"}], tags:[]
+    },
+    {
+      id:26, date:"2026-08-12", dow:"Tue",
+      title:"Puerto — beach + lunch day", coords:[15.856,-97.071],
+      overview:"Slow beach day with a long relaxed lunch as the anchor.",
+      am:"Swim at Carrizalillo.",
+      pm:"Long beach lunch.",
+      dinner:"Light dinner.",
+      dinnerOptions:[
+        { name:"Light dinner near accommodation", note:"You've already eaten well at lunch — keep it simple." },
+        { name:"Tacos or snacks", note:"Easy evening." },
+        { name:"Sunset drinks + light plates", note:"Wind-down vibe." }
+      ],
+      dinnerNote:"",
+      logistics:["None"],
+      bookings:[], tags:[]
+    },
+    {
+      id:27, date:"2026-08-13", dow:"Wed",
+      title:"Puerto — last full day", coords:[15.862,-97.072],
+      overview:"Final full day. Slow morning, pack, celebratory dinner.",
+      am:"Coffee + beach.",
+      pm:"Pack slowly.",
+      dinner:"Final celebratory dinner.",
+      dinnerOptions:[
+        { name:"Mombasa", note:"Great send-off dinner — scene-y, fun, memorable." },
+        { name:"Fish Shack", note:"If it's become your favourite — go back one last time." },
+        { name:"Best meal you haven't had yet", note:"Whatever's been recommended that you haven't tried." }
+      ],
+      dinnerNote:"Make it a celebration — last night in Mexico.",
+      logistics:["Pack for early departure"],
+      bookings:[], tags:[]
+    },
+    {
+      id:28, date:"2026-08-14", dow:"Thu",
+      title:"Fly PXM → LAX → MEL", coords:[33.9416,-118.4085],
+      overview:"Travel day home. Long haul back to Melbourne.",
+      am:"Transfer to airport.",
+      pm:"Travel.",
+      dinner:"In transit.",
+      dinnerOptions:[
+        { name:"Airport or in-flight", note:"Long travel day — eat when you can." },
+        { name:"LAX layover spot", note:"If you have a long layover, grab something decent." },
+        { name:"Just survive", note:"You've been eating amazingly for 4 weeks." }
+      ],
+      dinnerNote:"",
+      logistics:["PXM → LAX flight","LAX → MEL flight"],
+      bookings:[{type:"Flight", note:"PXM → LAX → MEL"}], tags:["travel"]
+    }
+  ];
+
+
+  // For days not explicitly expanded above, we’ll fall back to a simple template
+  const fallbackTemplate = (d) => ({
+    ...d,
+    overview: d.overview || "Day plan pending refinement.",
+    am: d.am || (d.plan?.[0] || "—"),
+    pm: d.pm || (d.plan?.[1] || "—"),
+    dinner: d.dinner || "Pick a good-looking local spot or eat on-site.",
+    dinnerOptions: d.dinnerOptions || [
+      { name:"On-site restaurant", note:"Low-effort option." },
+      { name:"Best-rated local seafood", note:"Easy win." },
+      { name:"Cocktails + light plates", note:"Keep it relaxed." }
+    ],
+    dinnerNote: d.dinnerNote || "",
+    logistics: d.logistics || ["—"],
+    tags: d.tags || []
+  });
+
+  // Original 28-day skeleton (so list still shows all days)
+  const skeleton = [
+    { id:1, date:"2026-07-18", dow:"Fri", title:"LAX → SJD → San José del Cabo", coords:[23.058,-109.697], logistics:["07:05 land LAX","Fly LAX→SJD","Transfer"], tags:["travel"] },
+    { id:2, date:"2026-07-19", dow:"Sat", title:"San José — easy settle", coords:[23.058,-109.697], logistics:["No long transfers"], tags:[] },
+    { id:3, date:"2026-07-20", dow:"Sun", title:"San José — art + food", coords:[23.058,-109.697], logistics:["Short drives"], tags:[] },
+    { id:4, date:"2026-07-21", dow:"Mon", title:"Drive to East Cape", coords:[23.295,-109.429], logistics:["Pick up car","Drive"], tags:["travel"] },
+    { id:5, date:"2026-07-22", dow:"Tue", title:"Cabo Pulmo snorkel day", coords:[23.447,-109.418], logistics:["Drive to Cabo Pulmo"], tags:[] },
+    { id:6, date:"2026-07-23", dow:"Wed", title:"East Cape — no plans day", coords:[23.295,-109.429], logistics:["None"], tags:[] },
+    { id:7, date:"2026-07-24", dow:"Thu", title:"Drive to Todos Santos / El Pescadero", coords:[23.448,-110.225], logistics:["Drive"], tags:["travel"] },
+    { id:8, date:"2026-07-25", dow:"Fri", title:"Todos Santos — beach + town", coords:[23.370,-110.175], logistics:["Local drives"], tags:[] },
+    { id:9, date:"2026-07-26", dow:"Sat", title:"Polaris/ATV day", coords:[23.448,-110.225], logistics:["Tour"], tags:[] },
+    { id:10, date:"2026-07-27", dow:"Sun", title:"Todos Santos — slow day", coords:[23.448,-110.225], logistics:["None"], tags:[] },
+    { id:11, date:"2026-07-28", dow:"Mon", title:"Drive to La Paz", coords:[24.142,-110.313], logistics:["Drive"], tags:["travel"] },
+    { id:12, date:"2026-07-29", dow:"Tue", title:"Isla Espíritu Santo — boat day", coords:[24.577,-110.399], logistics:["Boat day"], tags:[] },
+    { id:13, date:"2026-07-30", dow:"Wed", title:"La Paz — Balandra", coords:[24.317,-110.333], logistics:["Drive"], tags:[] },
+    { id:14, date:"2026-07-31", dow:"Thu", title:"La Paz — buffer day", coords:[24.142,-110.313], logistics:["None"], tags:[] },
+    { id:15, date:"2026-08-01", dow:"Fri", title:"Fly La Paz → Mexico City", coords:[19.412,-99.167], logistics:["Flight"], tags:["travel"] },
+    { id:16, date:"2026-08-02", dow:"Sat", title:"CDMX — reset", coords:[19.412,-99.167], logistics:["Walk/Uber"], tags:[] },
+    { id:17, date:"2026-08-03", dow:"Sun", title:"CDMX — Barragán + Coyoacán", coords:[19.348,-99.162], logistics:["Timed tickets"], tags:[] },
+    { id:18, date:"2026-08-04", dow:"Mon", title:"CDMX — Teotihuacán", coords:[19.692,-98.843], logistics:["Day trip"], tags:[] },
+    { id:19, date:"2026-08-05", dow:"Tue", title:"CDMX — markets + dinner", coords:[19.432,-99.143], logistics:["Walk/Uber"], tags:[] },
+    { id:20, date:"2026-08-06", dow:"Wed", title:"Fly CDMX → Puerto Escondido", coords:[15.862,-97.072], logistics:["Flight"], tags:["travel"] },
+    { id:21, date:"2026-08-07", dow:"Thu", title:"Puerto — swim day", coords:[15.856,-97.071], logistics:["Short rides"], tags:[] },
+    { id:22, date:"2026-08-08", dow:"Fri", title:"Puerto — Casa Wabi", coords:[15.865,-97.003], logistics:["Transport"], tags:[] },
+    { id:23, date:"2026-08-09", dow:"Sat", title:"Puerto — boat/snorkel", coords:[15.862,-97.072], logistics:["Boat"], tags:[] },
+    { id:24, date:"2026-08-10", dow:"Sun", title:"Puerto — do nothing day", coords:[15.862,-97.072], logistics:["None"], tags:[] },
+    { id:25, date:"2026-08-11", dow:"Mon", title:"Puerto — bioluminescence", coords:[15.859,-97.072], logistics:["Night tour"], tags:[] },
+    { id:26, date:"2026-08-12", dow:"Tue", title:"Puerto — beach + lunch", coords:[15.856,-97.071], logistics:["None"], tags:[] },
+    { id:27, date:"2026-08-13", dow:"Wed", title:"Puerto — last day", coords:[15.862,-97.072], logistics:["Pack"], tags:[] },
+    { id:28, date:"2026-08-14", dow:"Thu", title:"Fly PXM → LAX → MEL", coords:[33.9416,-118.4085], logistics:["Flight"], tags:["travel"] }
+  ];
+
+  // Merge skeleton with expanded content
+  const itineraryById = new Map(itinerary.map(d => [d.id, d]));
+  const days = skeleton.map(d => fallbackTemplate(itineraryById.get(d.id) || d));
+
+  // Routes (same as before)
+  const travelSegments = {
+    1:  { from:[33.9416,-118.4085], to:[23.058,-109.697], label:"LAX → SJD" },
+    4:  { from:[23.058,-109.697], to:[23.295,-109.429], label:"San José → East Cape" },
+    7:  { from:[23.295,-109.429], to:[23.448,-110.225], label:"East Cape → Todos Santos" },
+    11: { from:[23.448,-110.225], to:[24.142,-110.313], label:"Todos Santos → La Paz" },
+    15: { from:[24.142,-110.313], to:[19.412,-99.167], label:"La Paz → CDMX" },
+    20: { from:[19.412,-99.167], to:[15.862,-97.072], label:"CDMX → Puerto Escondido" },
+    28: { from:[15.862,-97.072], to:[33.9416,-118.4085], label:"PXM → LAX" }
+  };
+
+  // Map init
+  const map = L.map('map', { zoomControl:true }).setView([22.5, -105.0], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:18, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
+
+  const markers = [];
+  const bounds = L.latLngBounds();
+
+  days.forEach(d => {
+    const stay = stayForDate(d.date);
+    const m = L.marker(d.coords).addTo(map);
+    m.bindPopup(`<b>Day ${d.id}</b><br>${d.dow} ${d.date}<br>${d.title}<br><span style="color:#9aa4b2">Stay: ${stay}</span>`);
+    markers.push({ id:d.id, marker:m });
+    bounds.extend(d.coords);
+  });
+  map.fitBounds(bounds, { padding:[40,40] });
+
+  // Route animation
+  let routeLine = null, routeDot = null, raf = null, dashOffset = 0;
+  function clearRoute(){
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    if (routeLine){ map.removeLayer(routeLine); routeLine = null; }
+    if (routeDot){ map.removeLayer(routeDot); routeDot = null; }
+  }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function animateRoute(seg){
+    clearRoute();
+    const from = L.latLng(seg.from[0], seg.from[1]);
+    const to   = L.latLng(seg.to[0], seg.to[1]);
+
+    routeLine = L.polyline([from,to], {
+      color: "#fbbf24",
+      weight: 3,
+      opacity: 0.95,
+      dashArray: "10 12",
+      dashOffset: "0",
+      className:"route-shadow"
+    }).addTo(map);
+
+    routeDot = L.circleMarker(from, { radius:5, color:"#0b0c10", weight:2, fillColor:"#fbbf24", fillOpacity:1 }).addTo(map);
+    map.fitBounds(L.latLngBounds([from,to]), { padding:[70,70] });
+
+    const durationMs = 2400;
+    const start = performance.now();
+    dashOffset = 0;
+
+    function step(now){
+      const elapsed = now - start;
+      const t = (elapsed % durationMs) / durationMs;
+
+      routeDot.setLatLng([ lerp(from.lat,to.lat,t), lerp(from.lng,to.lng,t) ]);
+      dashOffset = (dashOffset - 1.7);
+      routeLine.setStyle({ dashOffset: String(dashOffset) });
+
+      raf = requestAnimationFrame(step);
+    }
+    raf = requestAnimationFrame(step);
+  }
+
+  // Card refs
+  const dc = {
+    root: document.getElementById("dayCard"),
+    close: document.getElementById("dcClose"),
+    kicker: document.getElementById("dcKicker"),
+    title: document.getElementById("dcTitle"),
+    sub: document.getElementById("dcSub"),
+    chips: document.getElementById("dcChips"),
+    overview: document.getElementById("dcOverview"),
+    am: document.getElementById("dcAM"),
+    pm: document.getElementById("dcPM"),
+    dinner: document.getElementById("dcDinner"),
+    dinnerPicks: document.getElementById("dcDinnerPicks"),
+    dinnerNote: document.getElementById("dcDinnerNote"),
+    logistics: document.getElementById("dcLogistics"),
+  };
+
+  dc.close.addEventListener("click", () => { dc.root.style.display = "none"; setTimeout(()=> map.invalidateSize(), 50); });
+
+  function showCard(){
+    dc.root.style.display = "flex";
+    setTimeout(()=> map.invalidateSize(), 50);
+  }
+
+  function setLogistics(items){
+    dc.logistics.innerHTML = "";
+    (items || []).forEach(x => {
+      const li = document.createElement("li");
+      li.textContent = x;
+      dc.logistics.appendChild(li);
+    });
+    if (!items || items.length === 0){
+      const li = document.createElement("li");
+      li.textContent = "—";
+      dc.logistics.appendChild(li);
+    }
+  }
+
+  function setChips({stay, hasRoute}){
+    const bits = [];
+    if (stay && stay !== "—") bits.push(`<span class="chip stay">${stay}</span>`);
+    if (hasRoute) bits.push(`<span class="chip route">route</span>`);
+    dc.chips.innerHTML = bits.join("");
+  }
+
+  function setDinnerPicks(picks){
+    dc.dinnerPicks.innerHTML = "";
+    (picks || []).slice(0,3).forEach(p => {
+      const div = document.createElement("div");
+      div.className = "pick";
+      div.innerHTML = `<div class="dot"></div><div><b>${p.name}</b><span>${p.note || ""}</span></div>`;
+      dc.dinnerPicks.appendChild(div);
+    });
+    if (!picks || picks.length === 0){
+      dc.dinnerPicks.innerHTML = `<div class="muted">—</div>`;
+    }
+  }
+
+  // Sidebar render
+  const daylistEl = document.getElementById('daylist');
+  const searchEl = document.getElementById('search');
+
+  function renderList(filter=""){
+    daylistEl.innerHTML="";
+    const q=filter.trim().toLowerCase();
+    days
+      .filter(d=>{
+        if(!q) return true;
+        const blob=[d.title,d.date,d.dow,d.overview,d.am,d.pm,d.dinner,...(d.dinnerOptions||[]).map(x=>x.name)].join(" ").toLowerCase();
+        return blob.includes(q);
+      })
+      .forEach(d=>{
+        const stay=stayForDate(d.date);
+        const hasRoute = !!travelSegments[d.id];
+        const el=document.createElement("div");
+        el.className="day";
+        el.dataset.id=d.id;
+
+        const pills = [
+          hasRoute ? `<span class="pill route">route</span>` : ``,
+          (d.tags||[]).includes("travel") ? `<span class="pill flight">travel</span>` : ``
+        ].join("");
+
+        el.innerHTML=`
+          <div>
+            <h3>Day ${d.id} — ${d.dow} ${d.date}</h3>
+            <div class="meta">${d.title}<br><span class="muted">Stay: ${stay}</span></div>
+          </div>
+          <div class="pillrow">${pills}</div>
+        `;
+        el.addEventListener("click",()=>selectDay(d.id));
+        daylistEl.appendChild(el);
+      });
+  }
+
+  function selectDay(id){
+    document.querySelectorAll(".day").forEach(x=>x.classList.remove("active"));
+    const active=document.querySelector(`.day[data-id="${id}"]`);
+    if(active) active.classList.add("active");
+
+    const d=days.find(x=>x.id===id);
+    if(!d) return;
+
+    showCard();
+
+    const stay=stayForDate(d.date);
+    const seg=travelSegments[id];
+
+    if(seg){ animateRoute(seg); }
+    else{ clearRoute(); map.setView(d.coords, 10, { animate:true }); }
+
+    const m=markers.find(x=>x.id===id)?.marker;
+    if(m) m.openPopup();
+
+    dc.kicker.textContent = `DAY ${d.id} — ${d.dow} ${new Date(d.date+"T00:00:00").toLocaleDateString(undefined, {month:"short", day:"numeric"})}`;
+    dc.title.textContent = d.title;
+    dc.sub.textContent = `Base: ${stay}`;
+    setChips({stay, hasRoute: !!seg});
+
+    dc.overview.textContent = d.overview || "—";
+    dc.am.textContent = d.am || "—";
+    dc.pm.textContent = d.pm || "—";
+    dc.dinner.textContent = d.dinner || "—";
+    setDinnerPicks(d.dinnerOptions || []);
+    dc.dinnerNote.textContent = d.dinnerNote || "";
+    setLogistics(d.logistics || []);
+  }
+
+  searchEl.addEventListener("input",(e)=>renderList(e.target.value));
+  document.getElementById("fit").addEventListener("click",()=>{ clearRoute(); map.fitBounds(bounds,{padding:[40,40]}); });
+
+  renderList("");
+  selectDay(2);
+</script>
+</body>
+</html>
