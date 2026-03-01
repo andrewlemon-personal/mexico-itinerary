@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mexico Interactive Itinerary</title>
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121823;
+      --panel2: #0f151f;
+      --text: #e8eef7;
+      --muted: #a8b3c4;
+      --border: rgba(255,255,255,.08);
+      --accent: #4ea1ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    .app { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      padding: 16px;
+      overflow: auto;
+    }
+    .header h1 { font-size: 18px; margin: 0 0 6px; }
+    .header p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .filters { display: flex; gap: 8px; margin-bottom: 12px; }
+    .filters input {
+      width: 100%;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 10px;
+      border-radius: 10px;
+      outline: none;
+    }
+    .day {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: rgba(255,255,255,.03);
+      cursor: pointer;
+      transition: transform .08s ease, background .08s ease, border-color .08s ease;
+    }
+    .day:hover { transform: translateY(-1px); background: rgba(255,255,255,.045); }
+    .day.active { border-color: rgba(78,161,255,.55); box-shadow: 0 0 0 2px rgba(78,161,255,.12) inset; }
+    .day-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .day-title { font-weight: 700; }
+    .day-region { color: var(--muted); font-size: 12px; }
+    .day-meta { margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 999px;
+      margin-top: 10px;
+    }
+    #map { height: 100%; width: 100%; }
+    .leaflet-popup-content-wrapper { border-radius: 14px; }
+    .popup h3 { margin: 0 0 6px; font-size: 14px; }
+    .popup p { margin: 0; font-size: 13px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="header">
+        <h1>Mexico Trip — Interactive Itinerary</h1>
+        <p>Click a day to zoom the map and view details. Edit the <code>DAYS</code> array in this file.</p>
+      </div>
+
+      <div class="filters">
+        <input id="search" placeholder="Search (place, activity, region)..." />
+      </div>
+
+      <div id="dayList"></div>
+    </aside>
+
+    <main>
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <script>
+    // 1) EDIT THIS DATA
+    // lat/lng: use Google Maps → right-click → "What's here?" → copy coordinates
+    const DAYS = [
+      {
+        day: 1,
+        title: "Arrive → Todos Santos (settle in)",
+        region: "Baja Sur",
+        lat: 23.4516,
+        lng: -110.2238,
+        sleep: "Todos Santos",
+        morning: "Arrival + check-in",
+        afternoon: "Town wander + coffee + art shops",
+        evening: "Sunset drinks + casual tacos",
+        tags: ["drive", "food", "town"]
+      },
+      {
+        day: 2,
+        title: "Beach + surf day (Cerritos)",
+        region: "Baja Sur",
+        lat: 23.3344,
+        lng: -110.1769,
+        sleep: "Todos Santos / Pescadero",
+        morning: "Swim / surf lesson",
+        afternoon: "Long lunch + chill",
+        evening: "Nice dinner",
+        tags: ["beach", "water", "relax"]
+      },
+      {
+        day: 3,
+        title: "La Paz day trip (Espíritu Santo)",
+        region: "Baja Sur",
+        lat: 24.1426,
+        lng: -110.3128,
+        sleep: "Todos Santos / Pescadero",
+        morning: "Boat day (snorkel/sea lions)",
+        afternoon: "Beach lunch on the island",
+        evening: "Back for sunset",
+        tags: ["boat", "snorkel", "daytrip"]
+      }
+    ];
+
+    // 2) MAP INIT
+    const map = L.map('map', { zoomControl: true }).setView([23.6, -102.5], 5);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // 3) MARKERS
+    const markersByDay = new Map();
+
+    function popupHtml(d) {
+      return `
+        <div class="popup">
+          <h3>Day ${d.day}: ${escapeHtml(d.title)}</h3>
+          <p><strong>Region:</strong> ${escapeHtml(d.region)}</p>
+          <p><strong>Sleep:</strong> ${escapeHtml(d.sleep)}</p>
+          <p><strong>Morning:</strong> ${escapeHtml(d.morning)}</p>
+          <p><strong>Afternoon:</strong> ${escapeHtml(d.afternoon)}</p>
+          <p><strong>Evening:</strong> ${escapeHtml(d.evening)}</p>
+        </div>
+      `;
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function buildMarkers(filteredDays) {
+      // clear existing markers
+      markersByDay.forEach(m => map.removeLayer(m));
+      markersByDay.clear();
+
+      filteredDays.forEach(d => {
+        const marker = L.marker([d.lat, d.lng]).addTo(map);
+        marker.bindPopup(popupHtml(d));
+        markersByDay.set(d.day, marker);
+      });
+    }
+
+    // 4) SIDEBAR RENDER
+    const dayListEl = document.getElementById('dayList');
+    const searchEl = document.getElementById('search');
+
+    function render(days) {
+      dayListEl.innerHTML = "";
+      days.forEach(d => {
+        const el = document.createElement("div");
+        el.className = "day";
+        el.dataset.day = d.day;
+
+        el.innerHTML = `
+          <div class="day-top">
+            <div class="day-title">Day ${d.day}: ${escapeHtml(d.title)}</div>
+            <div class="day-region">${escapeHtml(d.region)}</div>
+          </div>
+          <div class="day-meta">
+            <div><strong>Sleep:</strong> ${escapeHtml(d.sleep)}</div>
+            <div><strong>AM:</strong> ${escapeHtml(d.morning)}</div>
+            <div><strong>PM:</strong> ${escapeHtml(d.afternoon)}</div>
+            <div><strong>Night:</strong> ${escapeHtml(d.evening)}</div>
+          </div>
+          <div class="pill">Tags: ${escapeHtml((d.tags || []).join(", "))}</div>
+        `;
+
+        el.addEventListener("click", () => selectDay(d.day));
+        dayListEl.appendChild(el);
+      });
+    }
+
+    function selectDay(dayNumber) {
+      document.querySelectorAll(".day").forEach(x => x.classList.remove("active"));
+      const active = document.querySelector(`.day[data-day="${dayNumber}"]`);
+      if (active) active.classList.add("active");
+
+      const marker = markersByDay.get(dayNumber);
+      if (marker) {
+        map.setView(marker.getLatLng(), 11, { animate: true });
+        marker.openPopup();
+      }
+    }
+
+    function applyFilter() {
+      const q = (searchEl.value || "").trim().toLowerCase();
+      const filtered = DAYS.filter(d => {
+        const blob = [
+          d.title, d.region, d.sleep, d.morning, d.afternoon, d.evening,
+          ...(d.tags || [])
+        ].join(" ").toLowerCase();
+        return blob.includes(q);
+      });
+
+      render(filtered);
+      buildMarkers(filtered);
+
+      // fit map to filtered markers if any
+      if (filtered.length) {
+        const bounds = L.latLngBounds(filtered.map(d => [d.lat, d.lng]));
+        map.fitBounds(bounds.pad(0.2));
+      }
+    }
+
+    searchEl.addEventListener("input", applyFilter);
+
+    // initial load
+    render(DAYS);
+    buildMarkers(DAYS);
+
+    // zoom to all points
+    const bounds = L.latLngBounds(DAYS.map(d => [d.lat, d.lng]));
+    map.fitBounds(bounds.pad(0.2));
+
+    // auto-select day 1
+    if (DAYS.length) selectDay(DAYS[0].day);
+  </script>
+</body>
+</html>
